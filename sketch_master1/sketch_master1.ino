@@ -2,37 +2,46 @@
 #include <WiFi.h>
 
 #define SERIAL_BAUD 115200
-#define PIN_BTN_GAUCHE 13
-#define PIN_BTN_DROITE 12
+#define MQ2_PIN 34
+#define LED_ROUGE_PIN 26
+#define LED_VERTE_PIN 27
+#define LED_BLEU_PIN 25
+#define BUZZER_PIN 33
 
-uint8_t broadcastAddress[] = {0x24, 0x6F, 0x28, 0x7B, 0x7C, 0xF0}; // Remplacer par l'adresse MAC du récepteur
+const int seuilDeDetection = 50;  // Définir un seuil approprié pour la détection de fumée
+const int delaiDetection = 10000;  // Délai en millisecondes avant de revérifier après détection de fumée
 
-// Structure pour envoyer les données
+uint8_t broadcastAddress[] = {0x24, 0x6F, 0x28, 0x7B, 0x7C, 0xF0}; // Remplacer par l'adresse MAC de la carte esclave
+
 typedef struct struct_message {
-    bool ledVert;   // Booléen pour représenter l'état de la LED verte
-    bool ledRouge;  // Booléen pour représenter l'état de la LED rouge
+    bool alarm;  // Booléen pour représenter l'état de l'alarme
 } struct_message;
 
 struct_message myData;
 
-// Callback lorsque les données sont envoyées
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
     Serial.print("\r\nMaster packet sent: ");
     Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
+void joue_melodie_ambulance() {
+    tone(BUZZER_PIN, 900);  // Allume le buzzer à une fréquence de 900 Hz
+    delay(500);
+    tone(BUZZER_PIN, 600);  // Change la fréquence à 600 Hz
+    delay(500);
+}
+
 void setup() {
-    // Initialisation du moniteur série
     Serial.begin(SERIAL_BAUD);
 
-    // Initialiser les boutons comme entrée
-    pinMode(PIN_BTN_GAUCHE, INPUT);
-    pinMode(PIN_BTN_DROITE, INPUT);
+    pinMode(MQ2_PIN, INPUT);
+    pinMode(LED_ROUGE_PIN, OUTPUT);
+    pinMode(LED_VERTE_PIN, OUTPUT);
+    pinMode(LED_BLEU_PIN, OUTPUT);
+    pinMode(BUZZER_PIN, OUTPUT);
 
-    // Configurer le dispositif comme station Wi-Fi
     WiFi.mode(WIFI_STA);
 
-    // Initialiser ESP-NOW
     if (esp_now_init() != ESP_OK) {
         Serial.println("Error initializing ESP-NOW");
         return;
@@ -41,16 +50,14 @@ void setup() {
     Serial.print("Transmitter initialized: ");
     Serial.println(WiFi.macAddress());
 
-    // Définir la fonction d'envoi
     esp_now_register_send_cb(OnDataSent);
 
-    // Enregistrer le peer
     esp_now_peer_info_t peerInfo;
     memset(&peerInfo, 0, sizeof(peerInfo));
     memcpy(peerInfo.peer_addr, broadcastAddress, 6);
     peerInfo.channel = 0;
     peerInfo.encrypt = false;
-    // Ajouter le peer
+
     if (esp_now_add_peer(&peerInfo) != ESP_OK) {
         Serial.println("Failed to add peer");
         return;
@@ -58,17 +65,42 @@ void setup() {
 }
 
 void loop() {
-    // Lire l'état des boutons
-    myData.ledVert = digitalRead(PIN_BTN_GAUCHE) == HIGH;
-    myData.ledRouge = digitalRead(PIN_BTN_DROITE) == HIGH;
+    int sensorValue = analogRead(MQ2_PIN);
+    Serial.print("Valeur analogique du capteur MQ2: ");
+    Serial.println(sensorValue);
 
-    // Envoyer l'état des LEDs
-    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
-    if (result == ESP_OK) {
-        Serial.println("Sent with success");
+    if (sensorValue > seuilDeDetection) {
+        digitalWrite(LED_VERTE_PIN, LOW);
+        digitalWrite(LED_ROUGE_PIN, HIGH);
+        myData.alarm = true;
+
+        // Envoyer l'état d'alarme à l'esclave
+        esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
+        if (result == ESP_OK) {
+            Serial.println("Sent with success");
+        } else {
+            Serial.println("Error sending the data");
+        }
+
+        // Jouer la mélodie de l'ambulance pendant que l'alarme est active
+        unsigned long startTime = millis();
+        while (millis() - startTime < delaiDetection) {
+            joue_melodie_ambulance();
+        }
     } else {
-        Serial.println("Error sending the data");
-    }
+        digitalWrite(LED_VERTE_PIN, HIGH);
+        digitalWrite(LED_ROUGE_PIN, LOW);
+        noTone(BUZZER_PIN);  // S'assurer que le buzzer est éteint
+        myData.alarm = false;
 
-    delay(10);  // Petit délai pour stabiliser les lectures du bouton
+        // Envoyer l'état d'alarme à l'esclave
+        esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
+        if (result == ESP_OK) {
+            Serial.println("Sent with success");
+        } else {
+            Serial.println("Error sending the data");
+        }
+
+        delay(1000);  // Attendre 1 seconde avant la prochaine lecture
+    }
 }

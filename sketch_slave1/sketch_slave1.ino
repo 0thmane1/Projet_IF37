@@ -2,51 +2,67 @@
 #include <WiFi.h>
 
 #define SERIAL_BAUD 115200
-#define PIN_VERT_GAUCHE 26
-#define PIN_ROUGE_DROITE 5
+#define LED_PIN_ROUGE 26
+#define LED_PIN_BLEU 27
+#define LED_PIN_BLEU_2 25
+#define VIBREUR_PIN 33
 
 // Structure pour recevoir les données
 typedef struct struct_message {
-    bool ledVert;   // Booléen pour représenter l'état de la LED verte
-    bool ledRouge;  // Booléen pour représenter l'état de la LED rouge
+    bool alarm;  // Booléen pour représenter l'état de l'alarme
 } struct_message;
 
 struct_message myData;
+bool alarmActive = false;
+unsigned long previousMillis = 0;
+const long interval = 500; // Intervalle de clignotement en millisecondes
 
 // Callback lorsque les données sont reçues
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
     Serial.println("Data received callback");
     memcpy(&myData, incomingData, sizeof(myData));
 
-    // Contrôler la LED verte en fonction des données reçues
-    if (myData.ledVert) {
-        digitalWrite(PIN_VERT_GAUCHE, HIGH); // Allumer la LED verte
+    if (myData.alarm) {
+        // Activer le vibreur
+        digitalWrite(VIBREUR_PIN, HIGH);
+        alarmActive = true;
     } else {
-        digitalWrite(PIN_VERT_GAUCHE, LOW); // Éteindre la LED verte
+        // Désactiver la LED et le vibreur
+        digitalWrite(VIBREUR_PIN, LOW);
+        eteindreLED();
+        alarmActive = false;
     }
+}
 
-    // Contrôler la LED rouge en fonction des données reçues
-    if (myData.ledRouge) {
-        digitalWrite(PIN_ROUGE_DROITE, HIGH); // Allumer la LED rouge
-    } else {
-        digitalWrite(PIN_ROUGE_DROITE, LOW); // Éteindre la LED rouge
-    }
+void allumerLEDRouge() {
+    digitalWrite(LED_PIN_ROUGE, HIGH);
+    digitalWrite(LED_PIN_BLEU, LOW);
+    digitalWrite(LED_PIN_BLEU_2, LOW);
+}
 
-    Serial.print("LED Vert State: ");
-    Serial.println(myData.ledVert);
-    Serial.print("LED Rouge State: ");
-    Serial.println(myData.ledRouge);
+void allumerLEDBleu() {
+    digitalWrite(LED_PIN_ROUGE, LOW);
+    digitalWrite(LED_PIN_BLEU, HIGH);
+    digitalWrite(LED_PIN_BLEU_2, HIGH);
+}
+
+void eteindreLED() {
+    digitalWrite(LED_PIN_ROUGE, LOW);
+    digitalWrite(LED_PIN_BLEU, LOW);
+    digitalWrite(LED_PIN_BLEU_2, LOW);
 }
 
 void setup() {
     // Initialisation du moniteur série
     Serial.begin(SERIAL_BAUD);
 
-    // Initialiser les LEDs comme sortie
-    pinMode(PIN_VERT_GAUCHE, OUTPUT);
-    pinMode(PIN_ROUGE_DROITE, OUTPUT);
-    digitalWrite(PIN_VERT_GAUCHE, LOW); // S'assurer que la LED verte est éteinte au départ
-    digitalWrite(PIN_ROUGE_DROITE, LOW); // S'assurer que la LED rouge est éteinte au départ
+    // Initialiser les broches de la LED et le vibreur comme sortie
+    pinMode(LED_PIN_ROUGE, OUTPUT);
+    pinMode(LED_PIN_BLEU, OUTPUT);
+    pinMode(LED_PIN_BLEU_2, OUTPUT);
+    pinMode(VIBREUR_PIN, OUTPUT);
+    eteindreLED();  // S'assurer que la LED est éteinte au départ
+    digitalWrite(VIBREUR_PIN, LOW);  // S'assurer que le vibreur est éteint au départ
 
     // Configurer le dispositif comme station Wi-Fi
     WiFi.mode(WIFI_STA);
@@ -66,5 +82,19 @@ void setup() {
 }
 
 void loop() {
-    // Rien à faire ici
+    if (alarmActive) {
+        unsigned long currentMillis = millis();
+        if (currentMillis - previousMillis >= interval) {
+            previousMillis = currentMillis;
+
+            // Alterner entre allumer les LEDs rouge et bleu
+            static bool ledState = false;
+            if (ledState) {
+                allumerLEDRouge();
+            } else {
+                allumerLEDBleu();
+            }
+            ledState = !ledState;
+        }
+    }
 }
